@@ -13,9 +13,9 @@ namespace MajesticParser.Services;
 // Проверяет последний релиз, сравнивает версию, качает и запускает установщик.
 public class UpdateService
 {
-    // ⚠ УКАЖИ СВОЙ РЕПОЗИТОРИЙ (owner/repo на GitHub)
-    public const string Owner = "Fantomasic";
-    public const string Repo = "MajesticParser";
+    // Репозиторий на GitHub (owner/repo)
+    public const string Owner = "FantomasicPlay";
+    public const string Repo = "majesticrp";
 
     private static readonly HttpClient Http = new();
 
