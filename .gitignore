@@ -1,0 +1,14 @@
+# Build output
+bin/
+obj/
+publish/
+installer_output/
+
+# Rider / VS
+.vs/
+.idea/
+*.user
+
+# Прочее
+*.tmp
+*.bak

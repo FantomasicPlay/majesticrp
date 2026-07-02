@@ -1,0 +1,49 @@
+name: Release
+
+# Собирает установщик и публикует релиз при пуше тега вида v1.2.3
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Версия из тега
+        id: ver
+        shell: pwsh
+        run: |
+          $v = "${{ github.ref_name }}".TrimStart('v')
+          echo "version=$v" >> $env:GITHUB_OUTPUT
+
+      - name: Publish (self-contained win-x64)
+        run: >
+          dotnet publish MajesticParser.csproj -c Release -r win-x64 --self-contained true
+          -p:Version=${{ steps.ver.outputs.version }} -o publish
+
+      - name: Установить Inno Setup
+        run: choco install innosetup -y
+
+      - name: Собрать установщик
+        shell: pwsh
+        run: >
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          /DAppVersion=${{ steps.ver.outputs.version }} installer.iss
+
+      - name: Опубликовать релиз
+        uses: softprops/action-gh-release@v2
+        with:
+          files: installer_output/*.exe
+          generate_release_notes: true
