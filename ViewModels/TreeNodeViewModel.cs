@@ -203,6 +203,14 @@ public class TreeNodeViewModel : ObservableObject
         private set => SetField(ref _isLoading, value);
     }
 
+    // Выделение для группового удаления (Ctrl/Shift-клик) — отдельно от галочек
+    private bool _isSelected;
+    public bool IsSelected
+    {
+        get => _isSelected;
+        set => SetField(ref _isSelected, value);
+    }
+
     private async Task EnsureLoadedAsync()
     {
         if (_isLoaded || _isLoading || _loader == null)

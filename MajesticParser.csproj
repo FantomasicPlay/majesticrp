@@ -9,8 +9,8 @@
     <!-- Установка иконки для собранного .exe файла -->
     <ApplicationIcon>icon.ico</ApplicationIcon>
     <AssemblyName>MajesticParser</AssemblyName>
-    <Version>1.0.1</Version>
-    <FileVersion>1.0.1.0</FileVersion>
+    <Version>1.0.2</Version>
+    <FileVersion>1.0.2.0</FileVersion>
     <Product>Majestic RP Parser</Product>
     <Authors>Fantomasic</Authors>
   </PropertyGroup>

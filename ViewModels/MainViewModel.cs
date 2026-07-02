@@ -62,9 +62,10 @@ public class MainViewModel : ObservableObject
         CloseOverlayCommand = new RelayCommand(CloseOverlays);
 
         BrowseFolderCommand = new RelayCommand(BrowseFolder, () => !IsBusy);
-        RefreshTreeCommand = new RelayCommand(BuildRootNodes, () => !IsBusy);
+        RefreshTreeCommand = new RelayCommand(RefreshTree, () => !IsBusy);
         UncheckAllCommand = new RelayCommand(UncheckAll);
         CollapseAllCommand = new RelayCommand(CollapseAll);
+        DeleteSelectedCommand = new RelayCommand(DeleteSelected);
         StartCommand = new AsyncRelayCommand(StartAsync, () => !IsBusy);
         CancelCommand = new RelayCommand(Cancel, () => IsBusy);
         DeleteNodeCommand = new RelayCommand<TreeNodeViewModel>(DeleteNode);
@@ -373,6 +374,7 @@ public class MainViewModel : ObservableObject
     public RelayCommand RefreshTreeCommand { get; }
     public RelayCommand UncheckAllCommand { get; }
     public RelayCommand CollapseAllCommand { get; }
+    public RelayCommand DeleteSelectedCommand { get; }
     public AsyncRelayCommand StartCommand { get; }
     public RelayCommand CancelCommand { get; }
     public RelayCommand<TreeNodeViewModel> DeleteNodeCommand { get; }
@@ -420,7 +422,7 @@ public class MainViewModel : ObservableObject
         node.Parent?.Children.Remove(node);
         HideUrl(node.Url);
         node.Parent?.RecomputeAfterRemoval();
-        Log($"✓ Удалено (запомнено): {node.Display}");
+        Log($"✓ Удалено: {node.Display}  (вернуть — кнопка «↩ Вернуть удалённые»)");
     }
 
     // Пометить URL скрытым и сохранить в конфигурации
@@ -431,6 +433,103 @@ public class MainViewModel : ObservableObject
             return;
         _cfg.HiddenUrls.Add(url.Trim());
         _config.SaveConfig(_cfg);
+    }
+
+    // «Обновить» = вернуть все удалённые узлы + перестроить дерево из кэша
+    private void RefreshTree()
+    {
+        var hadHidden = _hidden.Count > 0;
+        if (hadHidden)
+        {
+            _hidden.Clear();
+            _cfg.HiddenUrls.Clear();
+            _config.SaveConfig(_cfg);
+        }
+
+        if (RootNodes.Count == 0)
+            BuildRootNodes();
+        else
+            foreach (var root in RootNodes.ToList())
+                ReloadNodeFromCache(root);
+
+        Log(hadHidden
+            ? "🔄 Дерево обновлено, удалённые узлы возвращены."
+            : "🔄 Дерево обновлено.");
+    }
+
+    // Перестроить содержимое узла из кэша (без обращения к сети)
+    private void ReloadNodeFromCache(TreeNodeViewModel node)
+    {
+        if (node.Kind != NodeKind.Forum)
+            return;
+        var key = UrlHelper.NormalizeForCompare(node.Url);
+        if (_nodeCache.TryGetValue(key, out var entry))
+            BuildChildrenFromCache(node, entry);
+    }
+
+    // ===================== МУЛЬТИВЫДЕЛЕНИЕ (Ctrl/Shift) =====================
+
+    // Плоский список видимых (развёрнутых) узлов — для диапазона по Shift
+    public List<TreeNodeViewModel> FlattenVisible()
+    {
+        var result = new List<TreeNodeViewModel>();
+        void Walk(IEnumerable<TreeNodeViewModel> nodes)
+        {
+            foreach (var n in nodes)
+            {
+                if (n.Kind == NodeKind.Placeholder)
+                    continue;
+                result.Add(n);
+                if (n.IsExpanded && n.Children.Count > 0)
+                    Walk(n.Children);
+            }
+        }
+        Walk(RootNodes);
+        return result;
+    }
+
+    public void ClearSelection()
+        => WalkTree(RootNodes, n => { if (n.IsSelected) n.IsSelected = false; });
+
+    public void ToggleSelect(TreeNodeViewModel node)
+    {
+        if (node.Kind != NodeKind.Placeholder)
+            node.IsSelected = !node.IsSelected;
+    }
+
+    public void SelectRange(TreeNodeViewModel anchor, TreeNodeViewModel target)
+    {
+        var flat = FlattenVisible();
+        var a = flat.IndexOf(anchor);
+        var b = flat.IndexOf(target);
+        if (a < 0 || b < 0)
+        {
+            ToggleSelect(target);
+            return;
+        }
+        var lo = Math.Min(a, b);
+        var hi = Math.Max(a, b);
+        ClearSelection();
+        for (var i = lo; i <= hi; i++)
+            flat[i].IsSelected = true;
+    }
+
+    // Удалить все выделенные узлы
+    private void DeleteSelected()
+    {
+        var selected = new List<TreeNodeViewModel>();
+        WalkTree(RootNodes, n => { if (n.IsSelected && n.Kind != NodeKind.Placeholder) selected.Add(n); });
+
+        if (selected.Count == 0)
+        {
+            Log("ℹ Ничего не выделено. Кликните по узлам с Ctrl или Shift, затем удалите.");
+            return;
+        }
+
+        foreach (var n in selected)
+            DeleteNode(n);
+
+        Log($"🗑 Удалено выделенных: {selected.Count}");
     }
 
     // ===================== ВЫБОР СЕРВЕРА → РАЗДЕЛА =====================

@@ -265,6 +265,18 @@
 
         <!-- ===== Узел дерева ===== -->
         <HierarchicalDataTemplate DataType="{x:Type vm:TreeNodeViewModel}" ItemsSource="{Binding Children}">
+            <Border CornerRadius="4" Padding="2,0">
+                <Border.Style>
+                    <Style TargetType="Border">
+                        <Setter Property="Background" Value="Transparent" />
+                        <Style.Triggers>
+                            <!-- выделенный для удаления узел — розовая подсветка -->
+                            <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                                <Setter Property="Background" Value="#55EC1E5B" />
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Border.Style>
             <StackPanel Orientation="Horizontal" Margin="0,1">
                 <CheckBox IsChecked="{Binding IsChecked, Mode=TwoWay}"
                           IsEnabled="{Binding CheckEnabled}"
@@ -296,6 +308,7 @@
                            VerticalAlignment="Center"
                            Visibility="{Binding IsLoading, Converter={StaticResource BoolToVis}}" />
             </StackPanel>
+            </Border>
         </HierarchicalDataTemplate>
     </Window.Resources>
 
@@ -362,7 +375,10 @@
                     <WrapPanel DockPanel.Dock="Top" Margin="0,0,0,8">
                         <Button Content="➕ Добавить раздел" Command="{Binding OpenAddSourceCommand}" MinWidth="0" />
                         <Button Content="🗑 Удалить источник" Command="{Binding OpenRemoveSourceCommand}" MinWidth="0" />
-                        <Button Content="🔄 Обновить" Command="{Binding RefreshTreeCommand}" MinWidth="0" />
+                        <Button Content="🔄 Обновить" Command="{Binding RefreshTreeCommand}" MinWidth="0"
+                                ToolTip="Обновить дерево и вернуть всё удалённое" />
+                        <Button Content="🗑 Удалить выделенные" Command="{Binding DeleteSelectedCommand}" MinWidth="0"
+                                ToolTip="Удалить все выделенные узлы (выделять: Ctrl+клик или Shift+клик, либо клавиша Delete)" />
                         <Button Content="☐ Снять галочки" Command="{Binding UncheckAllCommand}" MinWidth="0" />
                         <Button Content="▾ Свернуть всё" Command="{Binding CollapseAllCommand}" MinWidth="0" />
                     </WrapPanel>
@@ -382,7 +398,9 @@
                         </StackPanel>
                     </Border>
 
-                    <TreeView ItemsSource="{Binding RootNodes}">
+                    <TreeView x:Name="Tree" ItemsSource="{Binding RootNodes}"
+                              PreviewMouseLeftButtonDown="Tree_PreviewMouseLeftButtonDown"
+                              KeyDown="Tree_KeyDown">
                         <TreeView.ItemContainerStyle>
                             <Style TargetType="TreeViewItem">
                                 <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}" />
