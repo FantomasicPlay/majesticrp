@@ -72,8 +72,9 @@ public class MainViewModel : ObservableObject
         LoadServersCommand = new AsyncRelayCommand(LoadServersAsync, () => !IsBusy);
         RefreshNodeCommand = new RelayCommand<TreeNodeViewModel>(n => _ = RefreshNodeFromNetworkAsync(n));
         UpdateNowCommand = new AsyncRelayCommand(UpdateNowAsync);
+        DismissUpdateCommand = new RelayCommand(DismissUpdate);
 
-        // Тихая проверка обновлений при запуске
+        // Проверка обновлений при запуске (авто-установка если есть)
         _ = CheckForUpdateAsync();
     }
 
@@ -81,8 +82,11 @@ public class MainViewModel : ObservableObject
 
     private readonly UpdateService _updater = new();
     private string? _updateUrl;
+    private CancellationTokenSource? _updateCts;
     public AsyncRelayCommand UpdateNowCommand { get; private set; } = null!;
+    public RelayCommand DismissUpdateCommand { get; private set; } = null!;
 
+    // Проверка при запуске → автоматическая установка обновления
     private async Task CheckForUpdateAsync()
     {
         var result = await _updater.CheckAsync();
@@ -90,11 +94,13 @@ public class MainViewModel : ObservableObject
             return;
 
         _updateUrl = result.Value.url;
-        UpdateText = $"Доступна новая версия {result.Value.version} " +
-                     $"(у вас {UpdateService.CurrentVersion.ToString(3)}).";
-        UpdateStatus = "";
+        UpdateText = $"Обновление до версии {result.Value.version} " +
+                     $"(у вас {UpdateService.CurrentVersion.ToString(3)}). Приложение перезапустится.";
         ShowUpdate = true;
-        Log($"⬆ Доступно обновление: v{result.Value.version}");
+        Log($"⬆ Найдено обновление v{result.Value.version} — устанавливаю автоматически…");
+
+        // Автообновление при заходе
+        await UpdateNowAsync();
     }
 
     private async Task UpdateNowAsync()
@@ -102,17 +108,37 @@ public class MainViewModel : ObservableObject
         if (string.IsNullOrEmpty(_updateUrl))
             return;
 
-        UpdateStatus = "Скачиваю обновление…";
-        var path = await _updater.DownloadAsync(_updateUrl, p => UpdateStatus = $"Скачиваю обновление… {p}%");
+        _updateCts = new CancellationTokenSource();
+        var ct = _updateCts.Token;
 
-        if (path == null)
+        UpdateStatus = "Скачиваю обновление…";
+        var path = await _updater.DownloadAsync(_updateUrl,
+            p => UpdateStatus = $"Скачиваю обновление… {p}%", ct);
+
+        if (ct.IsCancellationRequested)
         {
-            UpdateStatus = "⚠ Не удалось скачать обновление.";
+            UpdateStatus = "";
+            ShowUpdate = false;
             return;
         }
 
-        UpdateStatus = "Запускаю установщик…";
-        _updater.RunInstallerAndExit(path); // закроет приложение и откроет установщик
+        if (path == null)
+        {
+            UpdateStatus = "⚠ Не удалось скачать обновление. Можно продолжить работу.";
+            return;
+        }
+
+        UpdateStatus = "Устанавливаю и перезапускаю…";
+        _updater.RunInstallerAndExit(path, silent: true); // тихо ставит и перезапускает
+    }
+
+    // «Позже» — отменить автообновление и продолжить работу
+    private void DismissUpdate()
+    {
+        _updateCts?.Cancel();
+        ShowUpdate = false;
+        UpdateStatus = "";
+        Log("⏭ Обновление отложено.");
     }
 
     // ===================== ДЕРЕВО =====================

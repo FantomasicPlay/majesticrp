@@ -71,24 +71,25 @@ public class UpdateService
         }
     }
 
-    public async Task<string?> DownloadAsync(string url, Action<int>? progress = null)
+    public async Task<string?> DownloadAsync(string url, Action<int>? progress = null,
+        System.Threading.CancellationToken ct = default)
     {
         try
         {
             var tmp = Path.Combine(Path.GetTempPath(), "MajesticParser_Update.exe");
-            using var resp = await Http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead);
+            using var resp = await Http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct);
             resp.EnsureSuccessStatusCode();
 
             var total = resp.Content.Headers.ContentLength ?? -1;
-            await using var input = await resp.Content.ReadAsStreamAsync();
+            await using var input = await resp.Content.ReadAsStreamAsync(ct);
             await using var output = File.Create(tmp);
 
             var buffer = new byte[81920];
             long read = 0;
             int n;
-            while ((n = await input.ReadAsync(buffer)) > 0)
+            while ((n = await input.ReadAsync(buffer, ct)) > 0)
             {
-                await output.WriteAsync(buffer.AsMemory(0, n));
+                await output.WriteAsync(buffer.AsMemory(0, n), ct);
                 read += n;
                 if (total > 0)
                     progress?.Invoke((int)(read * 100 / total));
@@ -101,9 +102,14 @@ public class UpdateService
         }
     }
 
-    public void RunInstallerAndExit(string installerPath)
+    // Запустить установщик и закрыть приложение.
+    // silent = тихая установка с автоперезапуском (для автообновления при запуске).
+    public void RunInstallerAndExit(string installerPath, bool silent = false)
     {
-        Process.Start(new ProcessStartInfo(installerPath) { UseShellExecute = true });
+        var psi = new ProcessStartInfo(installerPath) { UseShellExecute = true };
+        if (silent)
+            psi.Arguments = "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART";
+        Process.Start(psi);
         Application.Current.Shutdown();
     }
 }

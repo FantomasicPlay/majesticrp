@@ -539,7 +539,7 @@
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,18,0,0">
                         <Button Content="Обновить сейчас" Command="{Binding UpdateNowCommand}"
                                 Style="{StaticResource AccentButton}" MinWidth="150" />
-                        <Button Content="Позже" Command="{Binding CloseOverlayCommand}" MinWidth="90" Margin="8,0,0,0" />
+                        <Button Content="Позже" Command="{Binding DismissUpdateCommand}" MinWidth="90" Margin="8,0,0,0" />
                     </StackPanel>
                 </StackPanel>
             </Border>
