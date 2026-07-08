@@ -90,13 +90,15 @@ public class ParserEngine : IDisposable
     }
 
     // Все темы форума рекурсивно (для выбранной галочкой папки-раздела).
+    // hidden — нормализованные URL удалённых пользователем узлов (пропускаются).
     public List<ThreadInfo> GatherForumThreads(Source source,
-        Dictionary<string, ForumCacheEntry> cache, bool headless, CancellationToken ct)
+        Dictionary<string, ForumCacheEntry> cache, bool headless, CancellationToken ct,
+        HashSet<string>? hidden = null)
     {
         var browser = EnsureBrowser(headless);
         var scraper = new ForumScraper(browser, _log, ct);
         return ForumScraper.UniqueThreads(
-            scraper.GatherThreadsFromScope(source, cache, includeSubforums: true));
+            scraper.GatherThreadsFromScope(source, cache, includeSubforums: true, hidden: hidden));
     }
 
     // ===== основной прогон =====

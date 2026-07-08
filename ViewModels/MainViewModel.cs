@@ -461,7 +461,7 @@ public class MainViewModel : ObservableObject
         _config.SaveConfig(_cfg);
     }
 
-    // «Обновить» = вернуть все удалённые узлы + перестроить дерево из кэша
+    // «Обновить» = вернуть все удалённые узлы + перестроить всё дерево из кэша
     private void RefreshTree()
     {
         var hadHidden = _hidden.Count > 0;
@@ -472,25 +472,46 @@ public class MainViewModel : ObservableObject
             _config.SaveConfig(_cfg);
         }
 
+        // Запоминаем, какие разделы были раскрыты (по URL), чтобы восстановить состояние
+        var expanded = new HashSet<string>();
+        WalkTree(RootNodes, n =>
+        {
+            if (n.IsForum && n.IsExpanded)
+                expanded.Add(UrlHelper.NormalizeForCompare(n.Url));
+        });
+
         if (RootNodes.Count == 0)
             BuildRootNodes();
         else
             foreach (var root in RootNodes.ToList())
-                ReloadNodeFromCache(root);
+                DeepRebuildFromCache(root, expanded);
 
         Log(hadHidden
-            ? "🔄 Дерево обновлено, удалённые узлы возвращены."
+            ? "🔄 Дерево обновлено, все удалённые узлы возвращены."
             : "🔄 Дерево обновлено.");
     }
 
-    // Перестроить содержимое узла из кэша (без обращения к сети)
-    private void ReloadNodeFromCache(TreeNodeViewModel node)
+    // Рекурсивно перестроить узел и всё раскрытое поддерево из кэша (без сети, без фильтра скрытых)
+    private void DeepRebuildFromCache(TreeNodeViewModel node, HashSet<string> expanded)
     {
         if (node.Kind != NodeKind.Forum)
             return;
+
         var key = UrlHelper.NormalizeForCompare(node.Url);
-        if (_nodeCache.TryGetValue(key, out var entry))
-            BuildChildrenFromCache(node, entry);
+        if (!_nodeCache.TryGetValue(key, out var entry))
+            return; // нет в кэше — подтянется из сети при раскрытии
+
+        BuildChildrenFromCache(node, entry);
+
+        foreach (var child in node.Children)
+        {
+            if (child.Kind == NodeKind.Forum &&
+                expanded.Contains(UrlHelper.NormalizeForCompare(child.Url)))
+            {
+                child.SetExpandedRaw(true);
+                DeepRebuildFromCache(child, expanded);
+            }
+        }
     }
 
     // ===================== МУЛЬТИВЫДЕЛЕНИЕ (Ctrl/Shift) =====================
@@ -909,7 +930,7 @@ public class MainViewModel : ObservableObject
                 {
                     token.ThrowIfCancellationRequested();
                     Log($"\n📁 Собираю все темы раздела: {f.Name}");
-                    all.AddRange(_engine.GatherForumThreads(f, _threadCache, headless, token));
+                    all.AddRange(_engine.GatherForumThreads(f, _threadCache, headless, token, _hidden));
                 }
                 _config.SaveThreadCache(_threadCache);
                 all.AddRange(threadInfos);

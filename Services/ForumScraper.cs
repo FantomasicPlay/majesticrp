@@ -397,24 +397,34 @@ public class ForumScraper
 
     public List<ThreadInfo> GatherThreadsFromScope(Source source,
         Dictionary<string, ForumCacheEntry> cache, bool includeSubforums,
-        HashSet<string>? visited = null)
+        HashSet<string>? visited = null, HashSet<string>? hidden = null)
     {
         visited ??= new HashSet<string>();
+        hidden ??= new HashSet<string>();
 
         var forumUrl = source.Url.Trim();
         var key = UrlHelper.NormalizeForCompare(forumUrl);
         if (!visited.Add(key))
             return new List<ThreadInfo>();
 
+        // Пропускаем удалённые пользователем разделы
+        if (hidden.Contains(key))
+            return new List<ThreadInfo>();
+
         SyncForumCache(source, cache);
-        var threads = GetThreadsForSource(source, cache, includeMissing: false);
+        var threads = GetThreadsForSource(source, cache, includeMissing: false)
+            // и удалённые темы
+            .Where(t => !hidden.Contains(UrlHelper.NormalizeForCompare(t.Url)))
+            .ToList();
 
         if (includeSubforums)
         {
             foreach (var child in FetchChildForums(forumUrl))
             {
+                if (hidden.Contains(UrlHelper.NormalizeForCompare(child.Url)))
+                    continue; // удалённый подфорум не обходим
                 var childSource = new Source { Name = child.Name, Url = child.Url, Type = "forum" };
-                threads.AddRange(GatherThreadsFromScope(childSource, cache, true, visited));
+                threads.AddRange(GatherThreadsFromScope(childSource, cache, true, visited, hidden));
             }
         }
 

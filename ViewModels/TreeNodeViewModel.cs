@@ -228,6 +228,15 @@ public class TreeNodeViewModel : ObservableObject
         }
     }
 
+    // Установить «развёрнуто» без запуска ленивой загрузки (когда детей строим вручную)
+    public void SetExpandedRaw(bool value)
+    {
+        if (_isExpanded == value)
+            return;
+        _isExpanded = value;
+        OnPropertyChanged(nameof(IsExpanded));
+    }
+
     // Принудительно сбросить состояние загрузки (для «Обновить»)
     public void ResetLoad()
     {
