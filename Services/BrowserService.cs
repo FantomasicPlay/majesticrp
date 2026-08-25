@@ -15,6 +15,7 @@ public class BrowserService : IDisposable
 {
     private readonly Action<string> _log;
     private readonly string _profileDir;
+    private readonly bool _persistentProfile;
     public ChromeDriver Driver { get; }
 
     // Запущено ли приложение с правами администратора (под ним Chrome не стартует)
@@ -31,13 +32,24 @@ public class BrowserService : IDisposable
         }
     }
 
-    public BrowserService(bool headless, Action<string> log)
+    // persistentProfileDir != null → используем постоянный профиль (в нём живёт логин
+    // на форуме, Chrome сам расшифровывает свои куки). Иначе — одноразовый temp-профиль.
+    public BrowserService(bool headless, Action<string> log, string? persistentProfileDir = null)
     {
         _log = log;
 
-        // Уникальный профиль на каждую сессию — чтобы не конфликтовать
-        // с уже открытым обычным Chrome пользователя (иначе процесс может сразу выйти).
-        _profileDir = Path.Combine(Path.GetTempPath(), "MajesticParser_" + Guid.NewGuid().ToString("N"));
+        if (!string.IsNullOrEmpty(persistentProfileDir))
+        {
+            _profileDir = persistentProfileDir;
+            _persistentProfile = true;
+            Directory.CreateDirectory(_profileDir);
+        }
+        else
+        {
+            // Уникальный профиль на каждую сессию — чтобы не конфликтовать
+            // с уже открытым обычным Chrome пользователя (иначе процесс может сразу выйти).
+            _profileDir = Path.Combine(Path.GetTempPath(), "MajesticParser_" + Guid.NewGuid().ToString("N"));
+        }
 
         var options = new ChromeOptions();
         if (headless)
@@ -175,7 +187,8 @@ public class BrowserService : IDisposable
         catch { /* ignore */ }
         try
         {
-            if (Directory.Exists(_profileDir))
+            // Постоянный профиль (с логином) не удаляем — иначе слетит сессия.
+            if (!_persistentProfile && Directory.Exists(_profileDir))
                 Directory.Delete(_profileDir, recursive: true);
         }
         catch { /* ignore */ }

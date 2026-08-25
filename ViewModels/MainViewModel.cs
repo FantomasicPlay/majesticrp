@@ -14,18 +14,30 @@ namespace MajesticParser.ViewModels;
 
 public class MainViewModel : ObservableObject
 {
-    private readonly ConfigService _config = new();
-    private readonly AppConfig _cfg;
-    private readonly Dictionary<string, ForumCacheEntry> _threadCache;
+    // Не readonly: пересоздаются при переключении форума (данные раздельны по форуму).
+    private ConfigService _config;
+    private AppConfig _cfg;
+    private Dictionary<string, ForumCacheEntry> _threadCache;
     private readonly SemaphoreSlim _browserLock = new(1, 1);
     private ParserEngine? _engine;
     private CancellationTokenSource? _cts;
     private readonly StringBuilder _logBuffer = new();
-    private readonly Dictionary<string, NodeCacheEntry> _nodeCache;
-    private readonly HashSet<string> _hidden;
+    private Dictionary<string, NodeCacheEntry> _nodeCache;
+    private HashSet<string> _hidden;
+    private bool _forumInitDone;
 
     public MainViewModel()
     {
+        // Выбор форума до загрузки данных: активный форум определяет BaseUrl и папку данных.
+        foreach (var f in AppConstants.Forums)
+            Forums.Add(f);
+        var global = ConfigService.LoadGlobal();
+        var forum = AppConstants.Forums.FirstOrDefault(f => f.BaseUrl == global.SelectedForumBaseUrl)
+                    ?? AppConstants.Forums[0];
+        AppConstants.BaseUrl = forum.BaseUrl;
+        _selectedForum = forum; // без запуска переключения (инициализация)
+        _config = new ConfigService(ForumSubDir(forum));
+
         _cfg = _config.LoadConfig();
         _threadCache = _config.LoadThreadCache();
         _nodeCache = _config.LoadNodeCache();
@@ -73,9 +85,155 @@ public class MainViewModel : ObservableObject
         RefreshNodeCommand = new RelayCommand<TreeNodeViewModel>(n => _ = RefreshNodeFromNetworkAsync(n));
         UpdateNowCommand = new AsyncRelayCommand(UpdateNowAsync);
         DismissUpdateCommand = new RelayCommand(DismissUpdate);
+        LoginCommand = new AsyncRelayCommand(LoginAsync, () => !IsBusy && !IsLoginInProgress);
+        FinishLoginCommand = new AsyncRelayCommand(FinishLoginAsync, () => IsLoginInProgress);
+
+        _forumInitDone = true; // дальше смена SelectedForum запускает переключение форума
 
         // Проверка обновлений при запуске (авто-установка если есть)
         _ = CheckForUpdateAsync();
+    }
+
+    // ===================== ФОРУМЫ =====================
+
+    public ObservableCollection<Forum> Forums { get; } = new();
+
+    private Forum? _selectedForum;
+    public Forum? SelectedForum
+    {
+        get => _selectedForum;
+        set
+        {
+            if (!SetField(ref _selectedForum, value))
+                return;
+            if (_forumInitDone && value != null)
+                SwitchForum(value);
+        }
+    }
+
+    public AsyncRelayCommand LoginCommand { get; private set; } = null!;
+    public AsyncRelayCommand FinishLoginCommand { get; private set; } = null!;
+
+    private BrowserService? _loginBrowser;
+    private bool _isLoginInProgress;
+    public bool IsLoginInProgress
+    {
+        get => _isLoginInProgress;
+        set { SetField(ref _isLoginInProgress, value); RaiseCommands(); }
+    }
+
+    // Постоянный профиль Chrome для активного форума (в нём хранится логин).
+    private string CurrentProfileDir => Path.Combine(_config.DataDir, "chrome_profile");
+
+    private ParserEngine EnsureEngine()
+    {
+        _engine ??= new ParserEngine(Log);
+        _engine.ProfileDir = CurrentProfileDir;
+        return _engine;
+    }
+
+    // Первый форум пишет данные прямо в BaseDir (совместимость со старыми файлами),
+    // остальные — в подпапку по хосту.
+    private static string ForumSubDir(Forum forum)
+    {
+        if (forum.BaseUrl == AppConstants.Forums[0].BaseUrl)
+            return "";
+        try { return new Uri(forum.BaseUrl).Host; }
+        catch { return forum.Name; }
+    }
+
+    private void SwitchForum(Forum forum)
+    {
+        if (IsBusy)
+        {
+            Log("⚠ Идёт операция — переключение форума после её завершения.");
+            // Возвращаем выбор к активному форуму
+            _selectedForum = AppConstants.Forums.FirstOrDefault(f => f.BaseUrl == AppConstants.BaseUrl);
+            OnPropertyChanged(nameof(SelectedForum));
+            return;
+        }
+
+        // Активный форум сменился: сбрасываем браузер и куки предыдущего форума.
+        _engine?.Dispose();
+        _engine = null;
+        AppConstants.Cookies.Clear();
+
+        AppConstants.BaseUrl = forum.BaseUrl;
+        ConfigService.SaveGlobal(new GlobalSettings { SelectedForumBaseUrl = forum.BaseUrl });
+
+        // Перезагружаем весь контекст данных под новый форум.
+        _config = new ConfigService(ForumSubDir(forum));
+        _cfg = _config.LoadConfig();
+        _threadCache = _config.LoadThreadCache();
+        _nodeCache = _config.LoadNodeCache();
+        _hidden = new HashSet<string>(_cfg.HiddenUrls.Select(UrlHelper.NormalizeForCompare));
+        OutputBaseDir = _cfg.BaseOutputDir;
+
+        RootNodes.Clear();
+        Servers.Clear();
+        Sections.Clear();
+        BuildRootNodes();
+        foreach (var s in _config.LoadServers())
+            Servers.Add(s);
+        RestoreLastSection();
+        RefreshResumableRuns();
+
+        Log($"🌐 Форум переключён: {forum.Name} ({forum.BaseUrl}). " +
+            "Если требуется логин — нажми «🔐 Войти».");
+    }
+
+    // ===================== ВХОД В АККАУНТ (постоянный профиль) =====================
+
+    // Открывает обычное окно Chrome на постоянном профиле форума. Пользователь логинится
+    // руками (капча/2FA — как угодно). Профиль сохраняется, дальше парсер работает залогиненным.
+    private async Task LoginAsync()
+    {
+        var forum = SelectedForum ?? AppConstants.Forums[0];
+
+        // Освобождаем профиль от парсера (профиль нельзя открыть двумя Chrome сразу).
+        _engine?.Dispose();
+        _engine = null;
+
+        IsBusy = true;
+        IsLoginInProgress = true;
+        Status = "Окно входа...";
+        string profile = CurrentProfileDir;
+        Log($"🔐 Открываю окно Chrome для входа на {forum.Name}. " +
+            "Залогинься в аккаунт, затем нажми «✅ Готово».");
+
+        try
+        {
+            await Task.Run(() =>
+            {
+                _loginBrowser = new BrowserService(headless: false, Log, profile);
+                _loginBrowser.SafeGet(forum.BaseUrl + "/login/");
+            });
+        }
+        catch (Exception e)
+        {
+            Log("⚠ Не удалось открыть окно входа: " + e.Message);
+            CloseLoginBrowser();
+            IsBusy = false;
+            IsLoginInProgress = false;
+            Status = "Готов";
+        }
+    }
+
+    private async Task FinishLoginAsync()
+    {
+        Status = "Сохраняю профиль...";
+        await Task.Run(CloseLoginBrowser);
+        IsLoginInProgress = false;
+        IsBusy = false;
+        Status = "Готов";
+        Log("✅ Вход сохранён в профиль. Дальше парсер работает залогиненным.");
+    }
+
+    private void CloseLoginBrowser()
+    {
+        try { _loginBrowser?.Dispose(); }
+        catch { /* ignore */ }
+        _loginBrowser = null;
     }
 
     // ===================== АВТООБНОВЛЕНИЕ =====================
@@ -204,8 +362,8 @@ public class MainViewModel : ObservableObject
         {
             (subs, threads) = await Task.Run(() =>
             {
-                _engine ??= new ParserEngine(Log);
-                var res = _engine.LoadForumNode(source, _threadCache, headless, token);
+                EnsureEngine();
+                var res = _engine!.LoadForumNode(source, _threadCache, headless, token);
                 _config.SaveThreadCache(_threadCache);
                 return res;
             }, token);
@@ -414,6 +572,8 @@ public class MainViewModel : ObservableObject
         StartCommand.RaiseCanExecuteChanged();
         CancelCommand.RaiseCanExecuteChanged();
         LoadServersCommand.RaiseCanExecuteChanged();
+        LoginCommand?.RaiseCanExecuteChanged();
+        FinishLoginCommand?.RaiseCanExecuteChanged();
     }
 
     // ===================== УДАЛЕНИЕ УЗЛОВ ДЕРЕВА =====================
@@ -630,8 +790,8 @@ public class MainViewModel : ObservableObject
         {
             servers = await Task.Run(() =>
             {
-                _engine ??= new ParserEngine(Log);
-                return _engine.LoadServerCategories(headless, token);
+                EnsureEngine();
+                return _engine!.LoadServerCategories(headless, token);
             }, token);
         }
         catch (OperationCanceledException) { error = "отменено"; }
@@ -923,14 +1083,14 @@ public class MainViewModel : ObservableObject
         {
             var (parsed, images, done) = await Task.Run(async () =>
             {
-                _engine ??= new ParserEngine(Log);
+                EnsureEngine();
 
                 var all = new List<ThreadInfo>();
                 foreach (var f in forumSources)
                 {
                     token.ThrowIfCancellationRequested();
                     Log($"\n📁 Собираю все темы раздела: {f.Name}");
-                    all.AddRange(_engine.GatherForumThreads(f, _threadCache, headless, token, _hidden));
+                    all.AddRange(_engine!.GatherForumThreads(f, _threadCache, headless, token, _hidden));
                 }
                 _config.SaveThreadCache(_threadCache);
                 all.AddRange(threadInfos);
@@ -938,7 +1098,7 @@ public class MainViewModel : ObservableObject
                 var unique = ForumScraper.UniqueThreads(all);
                 Log($"\n✅ Итого уникальных тем к парсингу: {unique.Count}");
 
-                return await _engine.RunParsingAsync(unique, settings, outputDir, isResume, token);
+                return await _engine!.RunParsingAsync(unique, settings, outputDir, isResume, token);
             }, token);
 
             Log("\n✅ ГОТОВО");

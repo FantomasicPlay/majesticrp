@@ -22,17 +22,59 @@ public class ConfigService
     public string ThreadCachePath { get; }
     public string ServersCachePath { get; }
 
-    public ConfigService()
+    // Базовая папка данных (общая), внутри — подпапки по форуму.
+    public static string BaseDir { get; } = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "MajesticParser");
+
+    // subDir пустой → пишем прямо в BaseDir (форум по умолчанию, совместимость со
+    // старыми данными). Иначе — BaseDir\<subDir>, свои файлы на каждый форум.
+    public ConfigService(string subDir = "")
     {
-        DataDir = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "MajesticParser");
+        DataDir = string.IsNullOrEmpty(subDir)
+            ? BaseDir
+            : Path.Combine(BaseDir, SanitizeDir(subDir));
         Directory.CreateDirectory(DataDir);
 
         ConfigPath = Path.Combine(DataDir, "parser_config.json");
         ThreadCachePath = Path.Combine(DataDir, "thread_cache.json");
         ServersCachePath = Path.Combine(DataDir, "servers_cache.json");
         NodeCachePath = Path.Combine(DataDir, "node_cache.json");
+    }
+
+    private static string SanitizeDir(string s)
+    {
+        foreach (var c in Path.GetInvalidFileNameChars())
+            s = s.Replace(c, '_');
+        return s;
+    }
+
+    // ===== глобальные настройки (какой форум активен) — лежат в BaseDir =====
+
+    private static string GlobalPath => Path.Combine(BaseDir, "app_selection.json");
+
+    public static GlobalSettings LoadGlobal()
+    {
+        try
+        {
+            if (File.Exists(GlobalPath))
+            {
+                var g = JsonSerializer.Deserialize<GlobalSettings>(File.ReadAllText(GlobalPath));
+                if (g != null) return g;
+            }
+        }
+        catch { /* fallback ниже */ }
+        return new GlobalSettings();
+    }
+
+    public static void SaveGlobal(GlobalSettings g)
+    {
+        try
+        {
+            Directory.CreateDirectory(BaseDir);
+            File.WriteAllText(GlobalPath, JsonSerializer.Serialize(g, JsonOpts));
+        }
+        catch { /* не критично */ }
     }
 
     public string NodeCachePath { get; }

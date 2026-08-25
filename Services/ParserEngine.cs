@@ -16,6 +16,9 @@ public class ParserEngine : IDisposable
     private BrowserService? _browser;
     private bool _browserHeadless;
 
+    // Постоянный профиль Chrome с логином на форуме (задаётся из VM по активному форуму).
+    public string? ProfileDir { get; set; }
+
     public ParserEngine(Action<string> log)
     {
         _log = log;
@@ -28,7 +31,7 @@ public class ParserEngine : IDisposable
 
         _browser?.Dispose();
         _log(headless ? "🌐 Запускаю браузер (headless)..." : "🌐 Запускаю браузер...");
-        _browser = new BrowserService(headless, _log);
+        _browser = new BrowserService(headless, _log, ProfileDir);
         _browserHeadless = headless;
         _browser.ApplyCookiesIfNeeded();
         return _browser;

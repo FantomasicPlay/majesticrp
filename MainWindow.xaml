@@ -350,6 +350,20 @@
                     <!-- Выбор сервера → раздела -->
                     <Border DockPanel.Dock="Top" Background="#202026" CornerRadius="8" Padding="10,8" Margin="0,0,0,8">
                         <StackPanel>
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                                <TextBlock Text="🌐 Форум:" VerticalAlignment="Center" FontWeight="SemiBold" Width="74" />
+                                <ComboBox Width="240" ItemsSource="{Binding Forums}"
+                                          SelectedItem="{Binding SelectedForum}" DisplayMemberPath="Name"
+                                          VerticalAlignment="Center"
+                                          ToolTip="Форум для парсинга (у каждого свои источники, кэш и куки)" />
+                                <Button Content="🔐 Войти" Command="{Binding LoginCommand}"
+                                        Margin="8,0,0,0" MinWidth="0"
+                                        ToolTip="Открыть окно Chrome и войти в аккаунт форума один раз — сессия сохранится в профиле парсера" />
+                                <Button Content="✅ Готово" Command="{Binding FinishLoginCommand}"
+                                        Style="{StaticResource AccentButton}" Margin="6,0,0,0" MinWidth="0"
+                                        Visibility="{Binding IsLoginInProgress, Converter={StaticResource BoolToVis}}"
+                                        ToolTip="Нажми после того, как вошёл в аккаунт в открытом окне Chrome" />
+                            </StackPanel>
                             <StackPanel Orientation="Horizontal">
                                 <TextBlock Text="🖥 Сервер:" VerticalAlignment="Center" FontWeight="SemiBold" Width="74" />
                                 <ComboBox Width="240" ItemsSource="{Binding Servers}"

@@ -3,7 +3,26 @@ using System.Text.Json.Serialization;
 
 namespace MajesticParser.Models;
 
+// ================= ФОРУМЫ =================
+
+// Пресет форума: имя в интерфейсе + базовый URL. Куки/кэш/источники хранятся
+// раздельно по форуму (см. ConfigService), поэтому переключение изолировано.
+public class Forum
+{
+    public string Name { get; set; } = "";
+    public string BaseUrl { get; set; } = "";
+
+    public override string ToString() => Name;
+}
+
 // ================= КОНФИГ =================
+
+// Глобальные настройки, общие для всех форумов (какой форум выбран сейчас).
+public class GlobalSettings
+{
+    [JsonPropertyName("selected_forum")]
+    public string SelectedForumBaseUrl { get; set; } = "";
+}
 
 public class AppConfig
 {
