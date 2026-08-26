@@ -18,6 +18,8 @@
   <ItemGroup>
     <PackageReference Include="AngleSharp" Version="1.5.1" />
     <PackageReference Include="Selenium.WebDriver" Version="4.45.0" />
+    <!-- WMI: найти и убить chrome.exe, держащий профиль парсера -->
+    <PackageReference Include="System.Management" Version="8.0.0" />
   </ItemGroup>
 
   <ItemGroup>
