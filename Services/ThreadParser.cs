@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
-using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using AngleSharp.Dom;
@@ -15,8 +14,6 @@ namespace MajesticParser.Services;
 // Перенос: build_thread_page_url, fetch_all_thread_pages, parse_thread
 public class ThreadParser
 {
-    private static readonly Regex TitleSuffix = new(@"\s*\|.*$", RegexOptions.Singleline);
-
     private readonly BrowserService _browser;
     private readonly ImageService _images;
     private readonly ParseSettings _settings;
@@ -126,10 +123,25 @@ public class ThreadParser
         }
 
         var firstDoc = pages[0];
-        var titleTag = firstDoc.QuerySelector("h1.p-title-value")
-                       ?? (IElement?)firstDoc.QuerySelector("title");
-        var threadTitle = titleTag != null ? HtmlHelper.GetSeparatedText(titleTag, " ") : "untitled";
-        threadTitle = TitleSuffix.Replace(threadTitle, "").Trim();
+        // Заголовок берём из h1 темы КАК ЕСТЬ — в самом названии закона может быть «|»,
+        // резать по нему нельзя (была потеря символов). Хвост сайта убираем только у
+        // fallback-тега <title>, и только последний сегмент после последней «|».
+        var h1 = firstDoc.QuerySelector("h1.p-title-value")
+                 ?? firstDoc.QuerySelector(".p-title-value");
+        string threadTitle;
+        if (h1 != null)
+        {
+            threadTitle = HtmlHelper.GetSeparatedText(h1, " ").Trim();
+        }
+        else
+        {
+            var titleEl = firstDoc.QuerySelector("title");
+            var raw = titleEl != null ? HtmlHelper.GetSeparatedText(titleEl, " ").Trim() : "";
+            var lastPipe = raw.LastIndexOf('|');
+            threadTitle = (lastPipe > 0 ? raw.Substring(0, lastPipe) : raw).Trim();
+        }
+        if (string.IsNullOrEmpty(threadTitle))
+            threadTitle = "untitled";
 
         var threadId = UrlHelper.ExtractIdFromUrl(url);
         var filename = FilenameHelper.MakeFilename(threadTitle, threadId);
