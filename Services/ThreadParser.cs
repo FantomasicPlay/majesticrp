@@ -140,6 +140,11 @@ public class ThreadParser
             var lastPipe = raw.LastIndexOf('|');
             threadTitle = (lastPipe > 0 ? raw.Substring(0, lastPipe) : raw).Trim();
         }
+        // Схлопываем любые пробелы/переносы строк в названии в один пробел — иначе
+        // «Тема:» ломается на две строки, а оглавление сборника (regex ^Тема: (.*)$)
+        // берёт только первую строку и теряет хвост названия.
+        threadTitle = string.Join(" ",
+            threadTitle.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
         if (string.IsNullOrEmpty(threadTitle))
             threadTitle = "untitled";
 

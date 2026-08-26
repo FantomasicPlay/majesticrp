@@ -67,7 +67,7 @@ public class ForumScraper
 
         return new ThreadInfo
         {
-            Title = HtmlHelper.GetSeparatedText(link, " "),
+            Title = MultiSpace.Replace(HtmlHelper.GetSeparatedText(link, " "), " ").Trim(),
             Url = fullUrl,
             Id = UrlHelper.ExtractIdFromUrl(fullUrl),
             Missing = false
