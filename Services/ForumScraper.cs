@@ -15,6 +15,9 @@ public class ForumScraper
 {
     private static readonly Regex ThreadHrefStrict = new(@"^/threads/.+\.\d+/?$", RegexOptions.Compiled);
     private static readonly Regex ThreadHrefLoose = new(@"/threads/.+\.\d+/?$", RegexOptions.Compiled);
+    // Хвосты ссылки темы, которые надо срезать до канона /threads/slug.ID/
+    private static readonly Regex ThreadSuffix =
+        new(@"/(unread|latest|page-\d+|post-\d+)/?$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
     // Раздел форума: /forums/... или /categories/... (с числовым id или без).
     // НЕ матчит /link-forums/ (внешние ссылки) и /threads/.
     private static readonly Regex ForumHref = new(@"^/(forums|categories)/[^/?#]+/?$", RegexOptions.Compiled);
@@ -48,10 +51,17 @@ public class ForumScraper
     private static ThreadInfo? MakeThreadEntry(IElement link, HashSet<string> seen)
     {
         var href = (link.GetAttribute("href") ?? "").Trim();
-        if (string.IsNullOrEmpty(href) || href.Contains("/unread") || href.Contains("/latest"))
+        if (string.IsNullOrEmpty(href))
             return null;
 
-        var fullUrl = UrlHelper.NormalizeUrl(href);
+        // Канонизируем ссылку: /threads/slug.ID/unread|latest|page-N|post-N → /threads/slug.ID/
+        // Раньше такие ссылки просто отбрасывались, из-за чего заголовком темы становилась
+        // соседняя ссылка с датой последнего поста («Сегодня в 03:33»).
+        var canonical = ThreadSuffix.Replace(href, "/");
+        if (!ThreadHrefLoose.IsMatch(canonical))
+            return null;
+
+        var fullUrl = UrlHelper.NormalizeUrl(canonical);
         if (!seen.Add(fullUrl))
             return null;
 
@@ -93,8 +103,14 @@ public class ForumScraper
 
             foreach (var item in doc.QuerySelectorAll("div.structItem"))
             {
-                var link = item.QuerySelectorAll("a[href]")
-                    .FirstOrDefault(a => ThreadHrefStrict.IsMatch(a.GetAttribute("href") ?? ""));
+                // Заголовок — строго из ячейки .structItem-title (там название темы).
+                // Ссылка с датой последнего поста лежит в другой ячейке, поэтому раньше
+                // иногда попадала в заголовок вместо названия закона.
+                var titleCell = item.QuerySelector(".structItem-title");
+                var link = titleCell?.QuerySelectorAll("a[href]")
+                               .FirstOrDefault(a => (a.GetAttribute("href") ?? "").Contains("/threads/"))
+                           ?? item.QuerySelectorAll("a[href]")
+                               .FirstOrDefault(a => ThreadHrefStrict.IsMatch(a.GetAttribute("href") ?? ""));
                 if (link == null)
                     continue;
 

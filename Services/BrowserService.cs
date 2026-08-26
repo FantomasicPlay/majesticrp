@@ -43,6 +43,9 @@ public class BrowserService : IDisposable
             _profileDir = persistentProfileDir;
             _persistentProfile = true;
             Directory.CreateDirectory(_profileDir);
+            // Снимаем возможный залипший замок от прошлого (неаккуратно закрытого) Chrome —
+            // иначе новый экземпляр падает с "DevToolsActivePort file doesn't exist / crashed".
+            ClearSingletonLocks(_profileDir);
         }
         else
         {
@@ -70,19 +73,7 @@ public class BrowserService : IDisposable
         var service = ChromeDriverService.CreateDefaultService();
         service.HideCommandPromptWindow = true;
 
-        try
-        {
-            Driver = new ChromeDriver(service, options);
-        }
-        catch (WebDriverException e) when (e.Message.Contains("Chrome instance exited") ||
-                                           e.Message.Contains("session not created"))
-        {
-            var hint = IsElevated()
-                ? "Приложение запущено ОТ АДМИНИСТРАТОРА — Chrome не работает под админом. " +
-                  "Закройте приложение и запустите его как обычный пользователь (без «Запуск от имени администратора»)."
-                : "Не удалось запустить Chrome. Проверьте, что установлен Google Chrome и он обновлён.";
-            throw new InvalidOperationException(hint, e);
-        }
+        Driver = StartDriver(service, options);
 
         Driver.ExecuteCdpCommand("Page.addScriptToEvaluateOnNewDocument",
             new Dictionary<string, object?>
@@ -92,6 +83,56 @@ public class BrowserService : IDisposable
                     "Object.defineProperty(navigator, 'plugins', {get: () => [1,2,3]});" +
                     "Object.defineProperty(navigator, 'languages', {get: () => ['ru-RU', 'ru', 'en-US', 'en']});"
             });
+    }
+
+    // Запуск ChromeDriver с одним повтором для постоянного профиля: если первый старт
+    // упал (профиль ещё залочен закрывающимся Chrome) — снимаем замок, ждём и пробуем снова.
+    private ChromeDriver StartDriver(ChromeDriverService service, ChromeOptions options)
+    {
+        for (var attempt = 0; ; attempt++)
+        {
+            try
+            {
+                return new ChromeDriver(service, options);
+            }
+            catch (WebDriverException e) when (e.Message.Contains("Chrome instance exited") ||
+                                               e.Message.Contains("session not created"))
+            {
+                if (_persistentProfile && attempt == 0)
+                {
+                    ClearSingletonLocks(_profileDir);
+                    Thread.Sleep(1200);
+                    continue;
+                }
+                throw new InvalidOperationException(BuildStartHint(), e);
+            }
+        }
+    }
+
+    private string BuildStartHint()
+    {
+        if (IsElevated())
+            return "Приложение запущено ОТ АДМИНИСТРАТОРА — Chrome не работает под админом. " +
+                   "Закройте приложение и запустите его как обычный пользователь (без «Запуск от имени администратора»).";
+        if (_persistentProfile)
+            return "Не удалось запустить Chrome на профиле входа. Закройте все окна Chrome, " +
+                   "открытые этим парсером (в т.ч. окно входа), и повторите. Профиль: " + _profileDir;
+        return "Не удалось запустить Chrome. Проверьте, что установлен Google Chrome и он обновлён.";
+    }
+
+    // Удаляет залипшие файлы-замки Chrome в профиле (остаются при аварийном закрытии).
+    private static void ClearSingletonLocks(string profileDir)
+    {
+        foreach (var name in new[] { "SingletonLock", "SingletonCookie", "SingletonSocket", "lockfile" })
+        {
+            try
+            {
+                var p = Path.Combine(profileDir, name);
+                if (File.Exists(p))
+                    File.Delete(p);
+            }
+            catch { /* занят/недоступен — не критично */ }
+        }
     }
 
     public bool SafeGet(string url, int retries = AppConstants.NavRetries)
