@@ -9,8 +9,8 @@
     <!-- Установка иконки для собранного .exe файла -->
     <ApplicationIcon>icon.ico</ApplicationIcon>
     <AssemblyName>MajesticParser</AssemblyName>
-    <Version>1.0.6</Version>
-    <FileVersion>1.0.6.0</FileVersion>
+    <Version>1.0.7</Version>
+    <FileVersion>1.0.7.0</FileVersion>
     <Product>Majestic RP Parser</Product>
     <Authors>Fantomasic</Authors>
   </PropertyGroup>
@@ -18,8 +18,6 @@
   <ItemGroup>
     <PackageReference Include="AngleSharp" Version="1.5.1" />
     <PackageReference Include="Selenium.WebDriver" Version="4.45.0" />
-    <!-- WMI: найти и убить chrome.exe, держащий профиль парсера -->
-    <PackageReference Include="System.Management" Version="8.0.0" />
   </ItemGroup>
 
   <ItemGroup>

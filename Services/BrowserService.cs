@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
-using System.Management;
+using System.Linq;
 using System.Security.Principal;
 using System.Threading;
 using OpenQA.Selenium;
@@ -18,6 +18,8 @@ public class BrowserService : IDisposable
     private readonly Action<string> _log;
     private readonly string _profileDir;
     private readonly bool _persistentProfile;
+    // PID наших chrome.exe (снимок «появившихся» при запуске) — чтобы добить именно их.
+    private readonly List<int> _chromePids = new();
     public ChromeDriver Driver { get; }
 
     // Запущено ли приложение с правами администратора (под ним Chrome не стартует)
@@ -45,10 +47,8 @@ public class BrowserService : IDisposable
             _profileDir = persistentProfileDir;
             _persistentProfile = true;
             Directory.CreateDirectory(_profileDir);
-            // Добиваем зависшие с прошлых запусков chrome.exe, которые держат этот профиль
-            // (иначе новый Chrome падает: "DevToolsActivePort file doesn't exist / crashed"),
-            // и снимаем возможный залипший файл-замок.
-            KillChromeUsingProfile(_profileDir);
+            // Снимаем возможный залипший файл-замок от неаккуратно закрытого Chrome
+            // (иначе новый Chrome падает: "DevToolsActivePort file doesn't exist / crashed").
             ClearSingletonLocks(_profileDir);
         }
         else
@@ -95,16 +95,21 @@ public class BrowserService : IDisposable
     {
         for (var attempt = 0; ; attempt++)
         {
+            var before = ChromePidSet();
             try
             {
-                return new ChromeDriver(service, options);
+                var drv = new ChromeDriver(service, options);
+                // Запоминаем chrome.exe, появившиеся при этом запуске — это наши.
+                _chromePids.AddRange(ChromePidSet().Except(before));
+                return drv;
             }
             catch (WebDriverException e) when (e.Message.Contains("Chrome instance exited") ||
                                                e.Message.Contains("session not created"))
             {
+                // Добиваем крашнувшийся chrome именно этого запуска (иначе он держит профиль).
+                KillPids(ChromePidSet().Except(before));
                 if (_persistentProfile && attempt == 0)
                 {
-                    KillChromeUsingProfile(_profileDir);
                     ClearSingletonLocks(_profileDir);
                     Thread.Sleep(1200);
                     continue;
@@ -125,30 +130,25 @@ public class BrowserService : IDisposable
         return "Не удалось запустить Chrome. Проверьте, что установлен Google Chrome и он обновлён.";
     }
 
-    // Убивает chrome.exe, запущенные с данным профилем (--user-data-dir=profileDir).
-    // Это наши процессы (не обычный Chrome пользователя — у него другой профиль),
-    // оставшиеся от прошлых запусков; пока они живы, профиль занят и новый Chrome падает.
-    private static void KillChromeUsingProfile(string profileDir)
+    // PID всех текущих chrome.exe (для вычисления «наших» по разнице до/после запуска).
+    private static HashSet<int> ChromePidSet()
     {
-        try
+        try { return Process.GetProcessesByName("chrome").Select(p => p.Id).ToHashSet(); }
+        catch { return new HashSet<int>(); }
+    }
+
+    // Убивает указанные процессы вместе с их деревом (наши chrome).
+    private static void KillPids(IEnumerable<int> pids)
+    {
+        foreach (var pid in pids)
         {
-            using var searcher = new ManagementObjectSearcher(
-                "SELECT ProcessId, CommandLine FROM Win32_Process WHERE Name = 'chrome.exe'");
-            foreach (var o in searcher.Get())
+            try
             {
-                var cmd = o["CommandLine"] as string ?? "";
-                if (cmd.IndexOf(profileDir, StringComparison.OrdinalIgnoreCase) < 0)
-                    continue;
-                try
-                {
-                    var pid = Convert.ToInt32(o["ProcessId"]);
-                    using var proc = Process.GetProcessById(pid);
-                    proc.Kill(entireProcessTree: true);
-                }
-                catch { /* уже завершился / нет прав */ }
+                using var proc = Process.GetProcessById(pid);
+                proc.Kill(entireProcessTree: true);
             }
+            catch { /* уже завершился / нет прав */ }
         }
-        catch { /* WMI недоступен — не критично */ }
     }
 
     // Удаляет залипшие файлы-замки Chrome в профиле (остаются при аварийном закрытии).
@@ -258,8 +258,8 @@ public class BrowserService : IDisposable
         try { Driver.Dispose(); }
         catch { /* ignore */ }
         // Quit не всегда добивает chrome.exe (особенно при аварийном старте) —
-        // иначе процессы копятся и занимают профиль. Добиваем оставшиеся.
-        KillChromeUsingProfile(_profileDir);
+        // иначе процессы копятся и занимают профиль. Добиваем наши по PID.
+        KillPids(_chromePids);
         try
         {
             // Постоянный профиль (с логином) не удаляем — иначе слетит сессия.
